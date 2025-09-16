@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	doublestar "github.com/bmatcuk/doublestar/v4"
+
 	"file-crypto/internal/crypto"
 	"file-crypto/internal/fs"
 	"file-crypto/internal/system"
@@ -18,13 +20,13 @@ import (
 )
 
 type DecryptionStats struct {
-	totalFiles       int64
-	processedFiles   int64
-	successfulFiles  int64
-	failedFiles      int64
-	totalBytes       int64
-	startTime        time.Time
-	mutex            sync.RWMutex
+	totalFiles      int64
+	processedFiles  int64
+	successfulFiles int64
+	failedFiles     int64
+	totalBytes      int64
+	startTime       time.Time
+	mutex           sync.RWMutex
 }
 
 func (s *DecryptionStats) incrementProcessed() {
@@ -326,7 +328,8 @@ func matchAnyGlob(path string, patterns []string) bool {
 	unix := strings.ReplaceAll(path, "\\", "/")
 	for _, pat := range patterns {
 		pat = strings.ReplaceAll(pat, "\\", "/")
-		if ok, _ := filepath.Match(pat, unix); ok {
+		// doublestar supports ** so policy globs can match nested directories.
+		if ok, err := doublestar.Match(pat, unix); err == nil && ok {
 			return true
 		}
 	}

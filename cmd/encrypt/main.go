@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	doublestar "github.com/bmatcuk/doublestar/v4"
+
 	"file-crypto/internal/crypto"
 	"file-crypto/internal/fs"
 	"file-crypto/internal/sim"
@@ -449,7 +451,8 @@ func matchAnyGlob(path string, patterns []string) bool {
 	unix := strings.ReplaceAll(path, "\\", "/")
 	for _, pat := range patterns {
 		pat = strings.ReplaceAll(pat, "\\", "/")
-		if ok, _ := filepath.Match(pat, unix); ok {
+		// doublestar supports ** so policy globs can match nested directories.
+		if ok, err := doublestar.Match(pat, unix); err == nil && ok {
 			return true
 		}
 	}

@@ -28,17 +28,20 @@ func DecompressData(compressed []byte, originalSize int) ([]byte, error) {
 		return compressed, nil
 	}
 
+	if originalSize <= 0 {
+		originalSize = len(compressed) * 4
+	}
+
 	decompressed := make([]byte, originalSize)
 	n, err := lz4.UncompressBlock(compressed, decompressed)
 	if err != nil {
 		return nil, fmt.Errorf("decompression failed: %w", err)
 	}
-
-	if n != originalSize {
-		return nil, fmt.Errorf("decompressed size mismatch: expected %d, got %d", originalSize, n)
+	if n > originalSize {
+		return nil, fmt.Errorf("decompressed size overflow: %d > %d", n, originalSize)
 	}
 
-	return decompressed, nil
+	return decompressed[:n], nil
 }
 
 func CalculateCompressionRatio(original, compressed []byte) float64 {
