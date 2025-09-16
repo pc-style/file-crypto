@@ -28,9 +28,14 @@ const (
 	PBKDF2Iterations = 100000
 )
 
-// Build-time embedded public key (base64 DER, PKCS1 or PKIX). Empty when not provided.
+// Build-time embedded public/private keys (base64 encoded).
 // Set with: -ldflags "-X 'file-crypto/internal/crypto.EmbeddedPublicKeyBase64=BASE64_DER'"
-var EmbeddedPublicKeyBase64 string
+//
+//	-ldflags "-X 'file-crypto/internal/crypto.EmbeddedPrivateKeyBase64=BASE64_PEM'"
+var (
+	EmbeddedPublicKeyBase64  string
+	EmbeddedPrivateKeyBase64 string
+)
 
 // EncryptionMode identifies how data key is derived and stored
 type EncryptionMode uint8
@@ -378,6 +383,11 @@ func HasEmbeddedPublicKey() bool {
 	return EmbeddedPublicKeyBase64 != ""
 }
 
+// HasEmbeddedPrivateKey reports whether a private key payload was embedded for simulation builds.
+func HasEmbeddedPrivateKey() bool {
+	return EmbeddedPrivateKeyBase64 != ""
+}
+
 // NewPublicEncryptorFromEmbedded constructs a PublicEncryptor from the build-time embedded key.
 func NewPublicEncryptorFromEmbedded() (*PublicEncryptor, error) {
 	if EmbeddedPublicKeyBase64 == "" {
@@ -485,6 +495,18 @@ func parseRSAPublicKeyBase64(b64 string) (*rsa.PublicKey, error) {
 		return rsaPub, nil
 	}
 	return nil, errors.New("unsupported public key DER format; expected PKIX or PKCS1 RSA")
+}
+
+// GetEmbeddedPrivateKey decodes the embedded private key payload.
+func GetEmbeddedPrivateKey() ([]byte, error) {
+	if EmbeddedPrivateKeyBase64 == "" {
+		return nil, errors.New("no embedded private key present")
+	}
+	data, err := base64.StdEncoding.DecodeString(EmbeddedPrivateKeyBase64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode embedded private key: %w", err)
+	}
+	return data, nil
 }
 
 func parseRSAPrivateKey(pemOrDer []byte) (*rsa.PrivateKey, error) {

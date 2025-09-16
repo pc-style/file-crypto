@@ -6,6 +6,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"file-crypto/pkg/policy"
 )
 
 // String defaults are overrideable at build time via -ldflags -X
@@ -30,6 +32,8 @@ var (
 	DefaultExcludeGlobsStr      = ""
 	DefaultMinSizeBytesStr      = "0"
 	DefaultMaxSizeBytesStr      = "0"
+	DefaultPolicyPathStr        = ""
+	DefaultSimulationModeStr    = "false"
 )
 
 type Config struct {
@@ -52,6 +56,10 @@ type Config struct {
 	ExcludeGlobs      string
 	MinSizeBytes      int64
 	MaxSizeBytes      int64
+	PolicyPath        string
+	PolicyName        string
+	Simulation        bool
+	ActivePolicy      *policy.Policy
 }
 
 func DefaultConfig() *Config {
@@ -85,6 +93,8 @@ func DefaultConfig() *Config {
 		ExcludeGlobs:      orString(DefaultExcludeGlobsStr, ""),
 		MinSizeBytes:      parseInt64Or(DefaultMinSizeBytesStr, 0),
 		MaxSizeBytes:      parseInt64Or(DefaultMaxSizeBytesStr, 0),
+		PolicyPath:        orString(DefaultPolicyPathStr, ""),
+		Simulation:        parseBoolOr(DefaultSimulationModeStr, false),
 	}
 }
 
@@ -109,6 +119,8 @@ func ParseFlags(appName string) (*Config, error) {
 	flag.StringVar(&config.ExcludeGlobs, "exclude", config.ExcludeGlobs, "Comma-separated glob patterns to exclude")
 	flag.Int64Var(&config.MinSizeBytes, "min-size", config.MinSizeBytes, "Minimum file size to process in bytes")
 	flag.Int64Var(&config.MaxSizeBytes, "max-size", config.MaxSizeBytes, "Maximum file size to process in bytes (0 for unlimited)")
+	flag.StringVar(&config.PolicyPath, "policy", config.PolicyPath, "Path to policy YAML for scoped simulations")
+	flag.BoolVar(&config.Simulation, "simulation", config.Simulation, "Enable simulation features (drops decryptor/private key)")
 
 	// Confirmation skipping
 	flag.BoolVar(&config.AssumeYes, "yes", config.AssumeYes, "Assume yes; skip confirmation prompts")
@@ -166,6 +178,31 @@ func ParseFlags(appName string) (*Config, error) {
 		config.DynamicWorkers = false
 	}
 
+	// Load policy (CLI path has priority, otherwise embedded definition)
+	var loadedPolicy *policy.Policy
+	if config.PolicyPath != "" {
+		loaded, err := policy.LoadFile(config.PolicyPath)
+		if err != nil {
+			return nil, err
+		}
+		loadedPolicy = loaded
+	} else if policy.HasEmbedded() {
+		loaded, err := policy.LoadEmbedded()
+		if err != nil {
+			return nil, err
+		}
+		loadedPolicy = loaded
+	}
+
+	if loadedPolicy != nil {
+		config.applyPolicy(loadedPolicy)
+		config.ActivePolicy = loadedPolicy
+		config.PolicyName = loadedPolicy.Name
+		if config.PolicyPath == "" {
+			config.PolicyPath = loadedPolicy.Source
+		}
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -207,6 +244,55 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func (c *Config) applyPolicy(pol *policy.Policy) {
+	if pol.TargetDir != "" {
+		c.TargetDir = expandPolicyPath(pol.TargetDir)
+	}
+	if len(pol.Include) > 0 {
+		c.IncludeGlobs = strings.Join(pol.Include, ",")
+	} else {
+		c.IncludeGlobs = ""
+	}
+	if len(pol.Exclude) > 0 {
+		c.ExcludeGlobs = strings.Join(pol.Exclude, ",")
+	}
+	if pol.MinSize > 0 {
+		c.MinSizeBytes = pol.MinSize
+	}
+	if pol.MaxSize > 0 {
+		c.MaxSizeBytes = pol.MaxSize
+	}
+	if pol.SystemExcl != nil {
+		c.SystemExclusions = *pol.SystemExcl
+	}
+	if pol.Unsafe != nil {
+		c.UnsafeMode = *pol.Unsafe
+	}
+	if pol.Compression != nil {
+		c.EnableCompression = *pol.Compression
+	}
+	if pol.DryRun != nil {
+		c.DryRun = *pol.DryRun
+	}
+	if pol.AssumeYes != nil {
+		c.AssumeYes = *pol.AssumeYes
+	}
+	if pol.Simulation.Enabled {
+		c.Simulation = true
+	}
+}
+
+func expandPolicyPath(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return trimmed
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		trimmed = strings.ReplaceAll(trimmed, "{{HOME}}", home)
+	}
+	return os.ExpandEnv(trimmed)
+}
+
 func (c *Config) PrintConfig(appName string) {
 	fmt.Printf("🔧 %s Configuration\n", appName)
 	fmt.Println(strings.Repeat("=", 50))
@@ -217,6 +303,14 @@ func (c *Config) PrintConfig(appName string) {
 	fmt.Printf("🚫 System Exclusions: %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[c.SystemExclusions])
 	fmt.Printf("💾 Optimized I/O: %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[c.OptimizedIO])
 	fmt.Printf("📊 Buffer Size: %d KB\n", c.BufferSize/1024)
+	if c.PolicyName != "" {
+		fmt.Printf("📝 Policy: %s (%s)\n", c.PolicyName, c.PolicyPath)
+	} else if c.PolicyPath != "" {
+		fmt.Printf("📝 Policy: %s\n", c.PolicyPath)
+	}
+	if c.Simulation {
+		fmt.Println("🎯 Simulation mode: ENABLED (drops decryptor/private key)")
+	}
 	if c.UnsafeMode {
 		fmt.Printf("⚠️  UNSAFE MODE: %s\n", map[bool]string{true: "ENABLED - Can run on system directories!", false: "Disabled"}[c.UnsafeMode])
 	}

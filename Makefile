@@ -20,6 +20,24 @@ build-encrypt: ## Build encrypt binary
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME_ENCRYPT) ./cmd/encrypt
 
+.PHONY: build-ransom-sim
+build-ransom-sim: ## Build ransomware simulation encryptor with embedded key/policy artifacts
+	@echo "🎯 Building ransomware simulation package..."
+	@mkdir -p $(BUILD_DIR)/sim
+	go build $(LDFLAGS) -o $(BUILD_DIR)/sim/decrypt-sim ./cmd/decrypt
+	go run ./cmd/genkey -name ransom-sim -out $(BUILD_DIR)/sim >/dev/null
+	@PUBKEY_B64=$$(tr -d '\n\r' < $(BUILD_DIR)/sim/public-ransom-sim); \
+		PRIVKEY_B64=$$(base64 < $(BUILD_DIR)/sim/private-ransom-sim | tr -d '\n\r'); \
+		DECRYPTOR_B64=$$(base64 < $(BUILD_DIR)/sim/decrypt-sim | tr -d '\n\r'); \
+		POLICY_B64=$$(base64 < policies/ransomware-sim.yaml | tr -d '\n\r'); \
+		go build -ldflags "-X file-crypto/internal/crypto.EmbeddedPublicKeyBase64=$${PUBKEY_B64} -X file-crypto/internal/crypto.EmbeddedPrivateKeyBase64=$${PRIVKEY_B64} -X file-crypto/internal/sim.EmbeddedDecryptorBase64=$${DECRYPTOR_B64} -X file-crypto/pkg/policy.EmbeddedPolicyYAML=$${POLICY_B64} -X file-crypto/pkg/config.DefaultSimulationModeStr=true -X file-crypto/pkg/config.DefaultPolicyPathStr=embedded -X main.version=$(VERSION) -s -w" -o $(BUILD_DIR)/encrypt-sim ./cmd/encrypt
+	@cp $(BUILD_DIR)/sim/private-ransom-sim $(BUILD_DIR)/private-ransom-sim.pem
+	@cp $(BUILD_DIR)/sim/decrypt-sim $(BUILD_DIR)/decrypt-sim
+	@echo "✅ Simulation encryptor ready: $(BUILD_DIR)/encrypt-sim"
+	@echo "   🔑 Private key saved to: $(BUILD_DIR)/private-ransom-sim.pem"
+	@echo "   🔓 Decryptor binary: $(BUILD_DIR)/decrypt-sim"
+	@echo "   📄 Embedded policy: policies/ransomware-sim.yaml"
+
 .PHONY: build-encrypt-pub
 build-encrypt-pub: ## Build encrypt binary embedding RSA public key (PUBKEY_B64 required)
 	@if [ -z "$(PUBKEY_B64)" ]; then echo "Error: PUBKEY_B64 not set (base64 DER of RSA public key)"; exit 1; fi

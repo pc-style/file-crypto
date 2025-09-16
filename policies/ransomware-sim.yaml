@@ -1,0 +1,51 @@
+name: "Ransomware Simulation - User Data"
+description: |
+  Policy-driven configuration for red team ransomware exercises. Targets common
+  user documents while skipping caches and already encrypted content.
+target_dir: "{{HOME}}/Documents/testdata"
+include:
+  - "**/*.docx"
+  - "**/*.doc"
+  - "**/*.xlsx"
+  - "**/*.pptx"
+  - "**/*.pdf"
+  - "**/*.txt"
+  - "**/*.jpg"
+  - "**/*.png"
+  - "**/*.zip"
+exclude:
+  - "**/.git/**"
+  - "**/node_modules/**"
+  - "**/*.encrypted"
+  - "**/Library/**"
+  - "**/AppData/**"
+min_size_bytes: 1024
+system_exclusions: false
+unsafe: true
+assume_yes: true
+simulation:
+  enabled: true
+  drop_on_desktop: true
+  drop_folder: "FileCrypto-RansomSim"
+  decryptor_filename: "decryptor-sim"
+  private_key_filename: "private-key-ransom-sim.pem"
+  note_filename: "HOW_TO_RESTORE.txt"
+  note: |
+    ## File Crypto Simulation Notice
+
+    This workstation is participating in a controlled ransomware exercise.
+
+    Policy: {{POLICY_NAME}}
+    Target directory: {{TARGET_DIR}}
+
+    Decryptor: {{DECRYPTOR}}
+    Private key: {{PRIVATE_KEY}}
+
+    To recover data immediately, run:
+
+      {{DECRYPTOR}} -dir "{{TARGET_DIR}}" -key "{{PRIVATE_KEY}}" -verbose
+
+    Drop artifacts live in: {{DROP_DIR}}
+
+    This drill validates backup and incident-response readiness. No ransom is required.
+  auto_reveal_key: true

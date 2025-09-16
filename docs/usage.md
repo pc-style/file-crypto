@@ -72,6 +72,16 @@ Even in unsafe mode the hard-coded system deny list applies. Confirm the target 
 
 Use `make demo-clean` to remove demo data, or `make clean` to delete build artifacts. The `go clean` step inside the latter removes cached build outputs from module caches.
 
+## Running Ransomware Simulations
+
+Blue-team exercises often require a realistic ransomware run that still guarantees recovery. The `--simulation` flag, together with a policy file, activates a special mode that drops the private key, decryptor, and a recovery note onto the user's desktop once encryption completes.
+
+```bash
+./build/encrypt -dir ~/Documents --policy policies/ransomware-sim.yaml --simulation -verbose
+```
+
+The default policy (`policies/ransomware-sim.yaml`) targets common user file types, enables unsafe traversal, and instructs the encryptor to stage artefacts on the desktop. For convenience, `make build-ransom-sim` embeds both the policy and a decryptor so you can hand defenders a single binary for training.
+
 ## Running Tests
 
 While the project is primarily CLI-focused, core packages include unit tests. Run them as part of regular maintenance:

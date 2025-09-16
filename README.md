@@ -13,6 +13,7 @@ File Crypto is a portable command-line utility for encrypting and decrypting fil
 - Configurable worker pool, buffering, and compression for fast throughput on large datasets
 - Built-in system directory guard rails and file-extension allow lists that reduce accidental OS damage
 - Cross-platform builds via the `Makefile` (Linux, macOS, Windows, amd64/arm64)
+- Policy-driven ransomware simulations that automatically stage recovery assets for blue-team drills
 
 ## Getting Started
 
@@ -76,12 +77,29 @@ Dry runs (`-dry-run`) and the confirmation prompt are the safest way to validate
 Helpful `Makefile` targets:
 
 - `make build`, `make build-encrypt`, `make build-decrypt`, `make build-encrypt-pub`
+- `make build-ransom-sim` to generate a self-contained ransomware simulation package (see below)
 - `make build-linux`, `make build-windows`, `make build-all`
 - `make demo-setup`, `make demo-encrypt`, `make demo-decrypt`, `make demo-clean`
 - `make fmt`, `make vet`, `make test`, `make check`
 - `make clean` to remove `./build` and cached artifacts
 
 The project is module-aware (see `go.mod`). Run `go test ./...` to execute unit tests.
+
+## Ransomware Simulation Mode
+
+For incident-response rehearsals you can produce a policy-driven encryptor that behaves like controlled ransomware while keeping recovery artefacts within reach:
+
+```bash
+make build-ransom-sim
+```
+
+The target performs the following steps:
+
+- Builds a decryptor binary and embeds it into the encryptor alongside a freshly generated RSA key pair.
+- Embeds the default policy from `policies/ransomware-sim.yaml`, which targets user data patterns and enables simulation behaviour.
+- Enables the new `--simulation` flag by default so that, after encryption completes, the binary drops the private key, decryptor, and a recovery note on the current user's desktop.
+
+You can customise the policy or provide your own with `--policy <file>`. Simulation builds always surface the recovery artefacts to avoid accidental data loss during drills. If you modify the embedded policy, ensure it sets `simulation.enabled: true` so the safeguard remains active.
 
 ## Documentation
 

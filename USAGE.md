@@ -198,6 +198,25 @@ docker run --rm -it -v $(pwd)/build:/bin:ro -v $(pwd)/testdata:/data:rw ubuntu:2
 
 # Inside container - even root directory is safe here!
 /bin/encrypt-linux-amd64 -dir / --unsafe -verbose
+
+---
+
+## 🎯 Controlled Ransomware Simulation
+
+Need a turn-key drill that still guarantees recovery? Use the policy-driven build:
+
+```bash
+make build-ransom-sim
+./build/encrypt-sim -verbose
+```
+
+During execution the binary encrypts files per the embedded policy and, once the run finishes, drops these artefacts on the Desktop of the executing user:
+
+- the matching decryptor binary (extracted from the build)
+- the private key required for recovery
+- a markdown note with ready-to-run decrypt instructions
+
+This keeps the exercise realistic while ensuring defenders can restore data immediately without hunting for keys. Customise `policies/ransomware-sim.yaml` and rebuild if you need different targeting rules.
 ```
 
 ---

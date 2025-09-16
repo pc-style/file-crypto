@@ -18,6 +18,8 @@ The CLI binaries share a configuration package (`pkg/config`) so they honour the
 | `-quiet` | encrypt, decrypt | Suppress non-error output (inherited from `pkg/config`). |
 | `-dry-run` | encrypt | List candidate files without modifying disk. |
 | `-y`, `-yes` | encrypt, decrypt | Skip the confirmation prompt. |
+| `-policy <file>` | encrypt, decrypt | Load a YAML policy that can set globs, size limits, and simulation metadata. |
+| `-simulation` | encrypt | Force simulation artefact drops even without a policy. |
 
 ## Include and Exclude Globs
 
@@ -47,6 +49,14 @@ go build -ldflags "-X file-crypto/pkg/config.DefaultTargetDirStr=/data -X file-c
 ```
 
 The `Makefile` sets version metadata (`main.version`) automatically using `git describe`. When embedding a public key the build commands override `file-crypto/internal/crypto.EmbeddedPublicKeyBase64` as well.
+
+For ransomware drills, `make build-ransom-sim` demonstrates how to chain together multiple overrides:
+
+- `file-crypto/internal/crypto.EmbeddedPublicKeyBase64` – embedded RSA public key for hybrid encryption.
+- `file-crypto/internal/crypto.EmbeddedPrivateKeyBase64` – embedded PEM private key that is dropped to disk after simulations.
+- `file-crypto/internal/sim.EmbeddedDecryptorBase64` – embedded decryptor binary.
+- `file-crypto/pkg/policy.EmbeddedPolicyYAML` – base64-encoded YAML policy applied at startup.
+- `file-crypto/pkg/config.DefaultSimulationModeStr` – default the `--simulation` flag to `true`.
 
 ## System Exclusions
 
