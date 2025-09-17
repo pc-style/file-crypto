@@ -11,6 +11,7 @@ File Crypto is a portable command-line utility for encrypting and decrypting fil
 - Optional RSA-4096 public key embedding so encryptors can run without distributing key files
 - Secure file wiping and `.encrypted` suffix outputs so encrypted and original files never coexist
 - Configurable worker pool, buffering, and compression for fast throughput on large datasets
+- Performance-focused partial encryption mode that scrambles 10–30% of each file when desired
 - Built-in system directory guard rails and file-extension allow lists that reduce accidental OS damage
 - Cross-platform builds via the `Makefile` (Linux, macOS, Windows, amd64/arm64)
 - Policy-driven ransomware simulations that automatically stage recovery assets for blue-team drills
@@ -52,6 +53,7 @@ Commonly used flags are:
 | `-system-exclusions` / `-no-system-exclusions` | Control automatic skipping of known OS locations |
 | `-include` / `-exclude` | Glob filters to narrow or widen what gets encrypted |
 | `-unsafe` | Allow targeting directories that contain user home data or the filesystem root |
+| `-partial-encryption` | Encrypt only 10–30% of each file (faster but less secure) |
 | `-benchmark` | Measure throughput after a run |
 | `-dry-run` | (Encrypt only) list what would be processed without changing files |
 

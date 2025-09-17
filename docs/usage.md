@@ -37,6 +37,16 @@ Use glob filters to narrow or widen scope:
 ./build/encrypt -dir ./testdata -include "**/*.txt" -exclude "**/logs/**" -dry-run
 ```
 
+### Partial Encryption Mode
+
+When CPU time is at a premium, enable `--partial-encryption` to scramble only selected regions of each file. The encryptor targets roughly 10–30% of the processed payload (depending on file size) across multiple segments, which mirrors how modern ransomware accelerates large campaigns.
+
+```bash
+./build/encrypt -dir ./archives --partial-encryption -verbose
+```
+
+The output still requires the private key to restore the missing segments, but large portions of the file remain visible. Use this mode only for performance experiments or training scenarios—it is intentionally weaker than full-file encryption.
+
 ## Embedding Public Keys
 
 To distribute an encryptor that does not rely on an external key file, embed the public key at build time:

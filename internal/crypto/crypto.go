@@ -19,6 +19,7 @@ import (
 const (
 	EncryptionVersionV4 = 4
 	EncryptionVersionV5 = 5
+	EncryptionVersionV6 = 6
 
 	SaltSize         = 32
 	SessionIDSize    = 16
@@ -41,8 +42,9 @@ var (
 type EncryptionMode uint8
 
 const (
-	ModeSymmetricPBKDF2 EncryptionMode = 1
-	ModePublicKeyHybrid EncryptionMode = 2
+	ModeSymmetricPBKDF2  EncryptionMode = 1
+	ModePublicKeyHybrid  EncryptionMode = 2
+	ModeSymmetricPartial EncryptionMode = 3
 )
 
 type Encryptor struct {
@@ -71,6 +73,22 @@ type DecryptionHeaderV5 struct {
 	OriginalSize uint32
 	ChunksNeeded uint32
 	WrappedKey   []byte
+}
+
+type PartialSegment struct {
+	Offset uint64
+	Length uint64
+	Nonce  [NonceSize]byte
+	Tag    [TagSize]byte
+}
+
+type DecryptionHeaderV6 struct {
+	Version      uint32
+	Mode         EncryptionMode
+	Salt         []byte
+	SessionID    []byte
+	OriginalSize uint64
+	Segments     []PartialSegment
 }
 
 func NewEncryptor(rawKey []byte) (*Encryptor, error) {
@@ -169,6 +187,149 @@ func (e *Encryptor) EncryptData(data []byte) ([]byte, error) {
 	return result, nil
 }
 
+func (e *Encryptor) EncryptPartial(data []byte, percent int, segments int) ([]byte, error) {
+	if percent >= 100 || len(data) == 0 {
+		return e.EncryptData(data)
+	}
+
+	if percent <= 0 {
+		percent = 10
+	}
+	if segments <= 0 {
+		segments = 1
+	}
+
+	totalBytes := len(data) * percent / 100
+	if totalBytes == 0 && len(data) > 0 {
+		totalBytes = 1
+	}
+	if totalBytes > len(data) {
+		totalBytes = len(data)
+	}
+	if totalBytes == 0 {
+		return e.EncryptData(data)
+	}
+	if segments > totalBytes {
+		segments = totalBytes
+	}
+
+	lengths := make([]int, segments)
+	base := totalBytes / segments
+	remainder := totalBytes % segments
+	for i := 0; i < segments; i++ {
+		lengths[i] = base
+		if remainder > 0 {
+			lengths[i]++
+			remainder--
+		}
+	}
+
+	offsets := make([]int, segments)
+	dataLen := len(data)
+	for i := 0; i < segments; i++ {
+		windowStart := 0
+		if segments > 0 {
+			windowStart = i * dataLen / segments
+		}
+		start := windowStart
+		if start+lengths[i] > dataLen {
+			start = dataLen - lengths[i]
+		}
+		if start < 0 {
+			start = 0
+		}
+		offsets[i] = start
+	}
+
+	for i := 1; i < segments; i++ {
+		prevEnd := offsets[i-1] + lengths[i-1]
+		maxStart := dataLen - lengths[i]
+		if maxStart < 0 {
+			maxStart = 0
+		}
+		if prevEnd > maxStart {
+			prevEnd = maxStart
+		}
+		if offsets[i] < prevEnd {
+			offsets[i] = prevEnd
+		}
+	}
+
+	aead, err := chacha20poly1305.New(e.key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	processed := make([]byte, dataLen)
+	copy(processed, data)
+
+	segmentMetadata := make([]PartialSegment, 0, segments)
+
+	for i := 0; i < segments; i++ {
+		length := lengths[i]
+		if length <= 0 {
+			continue
+		}
+		start := offsets[i]
+		if start < 0 || start+length > dataLen {
+			continue
+		}
+		nonce := make([]byte, NonceSize)
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, fmt.Errorf("failed to generate nonce: %w", err)
+		}
+
+		ciphertext := aead.Seal(nil, nonce, data[start:start+length], nil)
+		if len(ciphertext) < length+TagSize {
+			return nil, errors.New("ciphertext too short for partial segment")
+		}
+
+		copy(processed[start:start+length], ciphertext[:length])
+
+		var nonceArr [NonceSize]byte
+		copy(nonceArr[:], nonce)
+		var tagArr [TagSize]byte
+		copy(tagArr[:], ciphertext[length:])
+
+		segmentMetadata = append(segmentMetadata, PartialSegment{
+			Offset: uint64(start),
+			Length: uint64(length),
+			Nonce:  nonceArr,
+			Tag:    tagArr,
+		})
+	}
+
+	if len(segmentMetadata) == 0 {
+		return e.EncryptData(data)
+	}
+
+	header := make([]byte, 0, 4+1+SaltSize+SessionIDSize+8+2+len(segmentMetadata)*(8+8+NonceSize+TagSize))
+	versionBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(versionBytes, EncryptionVersionV6)
+	header = append(header, versionBytes...)
+	header = append(header, byte(ModeSymmetricPartial))
+	header = append(header, e.salt...)
+	header = append(header, e.sessionID...)
+	originalSizeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(originalSizeBytes, uint64(len(data)))
+	header = append(header, originalSizeBytes...)
+	segmentCountBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(segmentCountBytes, uint16(len(segmentMetadata)))
+	header = append(header, segmentCountBytes...)
+	for _, meta := range segmentMetadata {
+		offsetBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(offsetBytes, meta.Offset)
+		header = append(header, offsetBytes...)
+		lengthBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(lengthBytes, meta.Length)
+		header = append(header, lengthBytes...)
+		header = append(header, meta.Nonce[:]...)
+		header = append(header, meta.Tag[:]...)
+	}
+
+	return append(header, processed...), nil
+}
+
 func DecryptData(encryptedData []byte, keyData []byte) ([]byte, error) {
 	if len(encryptedData) < 4 {
 		return nil, errors.New("encrypted data too short")
@@ -250,6 +411,54 @@ func DecryptData(encryptedData []byte, keyData []byte) ([]byte, error) {
 			return nil, errors.New("decrypted data smaller than original size")
 		}
 		return paddedData[:header.OriginalSize], nil
+
+	case EncryptionVersionV6:
+		header, headerSize, err := parseHeaderV6(encryptedData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse header v6: %w", err)
+		}
+		if header.Mode != ModeSymmetricPartial {
+			return nil, fmt.Errorf("unsupported mode in v6 header: %d", header.Mode)
+		}
+
+		key := pbkdf2.Key(keyData, header.Salt, PBKDF2Iterations, 32, sha256.New)
+		aead, err := chacha20poly1305.New(key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cipher: %w", err)
+		}
+
+		if len(encryptedData) < headerSize {
+			return nil, errors.New("encrypted data too short")
+		}
+		payload := encryptedData[headerSize:]
+		if uint64(len(payload)) < header.OriginalSize {
+			return nil, errors.New("encrypted data too short")
+		}
+
+		result := make([]byte, int(header.OriginalSize))
+		copy(result, payload[:int(header.OriginalSize)])
+
+		for _, segment := range header.Segments {
+			if segment.Length == 0 {
+				continue
+			}
+			start := int(segment.Offset)
+			length := int(segment.Length)
+			if start < 0 || length < 0 || start+length > len(result) {
+				return nil, errors.New("invalid partial segment metadata")
+			}
+			ciphertext := make([]byte, length+TagSize)
+			copy(ciphertext, payload[start:start+length])
+			copy(ciphertext[length:], segment.Tag[:])
+
+			plaintext, err := aead.Open(nil, segment.Nonce[:], ciphertext, nil)
+			if err != nil {
+				return nil, fmt.Errorf("decryption failed: %w", err)
+			}
+			copy(result[start:start+length], plaintext)
+		}
+
+		return result, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported encryption version: %d", version)
@@ -333,6 +542,58 @@ func parseHeaderV5(data []byte) (*DecryptionHeaderV5, int, error) {
 	header.WrappedKey = make([]byte, wrappedLen)
 	copy(header.WrappedKey, data[offset:offset+wrappedLen])
 	offset += wrappedLen
+
+	return header, offset, nil
+}
+
+func parseHeaderV6(data []byte) (*DecryptionHeaderV6, int, error) {
+	minFixed := 4 + 1 + SaltSize + SessionIDSize + 8 + 2
+	if len(data) < minFixed {
+		return nil, 0, errors.New("data too short for header v6")
+	}
+
+	offset := 0
+	header := &DecryptionHeaderV6{}
+
+	header.Version = binary.BigEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	header.Mode = EncryptionMode(data[offset])
+	offset += 1
+
+	header.Salt = make([]byte, SaltSize)
+	copy(header.Salt, data[offset:offset+SaltSize])
+	offset += SaltSize
+
+	header.SessionID = make([]byte, SessionIDSize)
+	copy(header.SessionID, data[offset:offset+SessionIDSize])
+	offset += SessionIDSize
+
+	header.OriginalSize = binary.BigEndian.Uint64(data[offset : offset+8])
+	offset += 8
+
+	segmentCount := binary.BigEndian.Uint16(data[offset : offset+2])
+	offset += 2
+
+	header.Segments = make([]PartialSegment, segmentCount)
+	for i := 0; i < int(segmentCount); i++ {
+		needed := 8 + 8 + NonceSize + TagSize
+		if len(data) < offset+needed {
+			return nil, 0, errors.New("data too short for partial segment metadata")
+		}
+
+		header.Segments[i].Offset = binary.BigEndian.Uint64(data[offset : offset+8])
+		offset += 8
+
+		header.Segments[i].Length = binary.BigEndian.Uint64(data[offset : offset+8])
+		offset += 8
+
+		copy(header.Segments[i].Nonce[:], data[offset:offset+NonceSize])
+		offset += NonceSize
+
+		copy(header.Segments[i].Tag[:], data[offset:offset+TagSize])
+		offset += TagSize
+	}
 
 	return header, offset, nil
 }
