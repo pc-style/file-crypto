@@ -36,6 +36,18 @@ make build-encrypt-pub PUBKEY_B64="$(cat public-backup)"
 
 ---
 
+## ⚡ Speed Mode: Partial Encryption
+
+Need a lighter touch for slower hardware? Add `--partial-encryption` to encrypt only the most critical 10–30% of every file. This mirrors fast ransomware tactics—files become unusable, but the process finishes much faster.
+
+```bash
+./build/encrypt -dir /path/to/data --partial-encryption -verbose
+```
+
+> ⚠️ **Reduced security:** Large portions of each file remain visible. Use this only for simulations or when performance takes priority.
+
+---
+
 ## 🔓 Decrypt Files
 
 ```bash

