@@ -2,33 +2,24 @@ name: "Ransomware Simulation - User Data"
 description: |
   Policy-driven configuration for red team ransomware exercises. Targets common
   user documents while skipping caches and already encrypted content.
-target_dir: "/Users/pcstyle/file-crypto/testdata"
+target_dir: "{{HOME}}/Documents/testdata"
 include:
   - "**/*.docx"
   - "**/*.doc"
-  - "**/*.md"
   - "**/*.xlsx"
   - "**/*.pptx"
-  - "**/*.rtf"
   - "**/*.pdf"
   - "**/*.txt"
   - "**/*.jpg"
   - "**/*.png"
-  - "**/*.py"
   - "**/*.zip"
-  - "**/*.yaml"
-  - "**/*.json"
-  - "**/*.ini"
-  - "**/*.csv"
-  - "**/*.ps1"
-  - "**/*.sh"
 exclude:
   - "**/.git/**"
   - "**/node_modules/**"
   - "**/*.encrypted"
   - "**/Library/**"
   - "**/AppData/**"
-min_size_bytes: 100
+min_size_bytes: 1024
 system_exclusions: false
 unsafe: true
 assume_yes: true

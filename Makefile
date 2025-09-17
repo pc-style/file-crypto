@@ -9,6 +9,7 @@ BINARY_NAME_TESTDATA := testdata
 BUILD_DIR := build
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -s -w"
+SIM_POLICY ?= policies/ransomware-sim.yaml
 
 ## Build Commands
 
@@ -31,6 +32,9 @@ build-ransom-sim: ## Build ransomware simulation encryptor with embedded key/pol
 		-public $(BUILD_DIR)/sim/public-ransom-sim \
 		-private $(BUILD_DIR)/sim/private-ransom-sim \
 		-decryptor $(BUILD_DIR)/sim/decrypt-sim \
+		-policy $(SIM_POLICY) \
+		-out internal/sim/simembed_generated.go
+	@go build -tags simassets $(LDFLAGS) -o $(BUILD_DIR)/encrypt-sim ./cmd/encrypt
 
 .PHONY: build-encrypt-pub
 build-encrypt-pub: ## Build encrypt binary embedding RSA public key (PUBKEY_B64 required)
@@ -203,6 +207,7 @@ clean: ## Clean build artifacts
 	@echo "🧹 Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)
 	go clean
+	rm -f internal/sim/simembed_generated.go
 
 .PHONY: deps
 deps: ## Download and tidy dependencies
